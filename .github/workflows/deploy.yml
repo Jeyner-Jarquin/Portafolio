@@ -86,7 +86,7 @@ jobs:
     steps:
       - name: Avisar si el deploy hook no esta configurado
         if: ${{ secrets.RENDER_DEPLOY_HOOK == '' }}
-        run: echo "::notice::Render no se actualizo: falta el secreto RENDER_DEPLOY_HOOK en Settings > Secrets."
+        run: 'echo "::notice::Render no se actualizo: falta el secreto RENDER_DEPLOY_HOOK en Settings > Secrets."'
 
       - name: Disparar el deploy hook de Render
         if: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
