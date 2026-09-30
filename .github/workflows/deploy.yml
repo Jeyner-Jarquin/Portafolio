@@ -1,0 +1,93 @@
+name: Verificar y publicar
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  verificar:
+    name: Verificar HTML y enlaces internos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validar el HTML
+        run: npx --yes html-validate@9 index.html 404.html
+
+      - name: Comprobar que existen los archivos del sitio
+        run: |
+          set -euo pipefail
+          for archivo in \
+            index.html \
+            css/styles.css \
+            js/main.js \
+            assets/favicon.svg \
+            assets/jeyner.jpg \
+            assets/og-image.png \
+            robots.txt \
+            sitemap.xml
+          do
+            test -s "$archivo" || { echo "Falta o esta vacio: $archivo"; exit 1; }
+          done
+
+      - name: Comprobar que las imagenes referenciadas existen
+        run: |
+          set -euo pipefail
+          grep -oE '(src|href)="(assets|css|js)/[^"]+"' index.html \
+            | sed -E 's/^(src|href)="//; s/"$//' \
+            | sort -u \
+            | while read -r ruta; do
+                test -f "$ruta" || { echo "Referencia rota: $ruta"; exit 1; }
+              done
+
+      - name: Comprobar los enlaces internos
+        run: |
+          set -euo pipefail
+          ids=$(grep -oE 'id="[^"]+"' index.html | sed -E 's/id="//; s/"$//' | sort -u)
+          for ancla in $(grep -oE 'href="#[^"]+"' index.html | sed -E 's/href="#//; s/"$//' | sort -u); do
+            echo "$ids" | grep -qx "$ancla" || { echo "Ancla sin destino: #$ancla"; exit 1; }
+          done
+
+  publicar-paginas:
+    name: Publicar en GitHub Pages
+    needs: verificar
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  publicar-render:
+    name: Publicar en Render
+    needs: verificar
+    runs-on: ubuntu-latest
+    steps:
+      - name: Avisar si el deploy hook no esta configurado
+        if: ${{ secrets.RENDER_DEPLOY_HOOK == '' }}
+        run: echo "::notice::Render no se actualizo: falta el secreto RENDER_DEPLOY_HOOK en Settings > Secrets."
+
+      - name: Disparar el deploy hook de Render
+        if: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
+        run: curl --fail --silent --show-error -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
